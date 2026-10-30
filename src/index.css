@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@layer utilities {
+  @keyframes bounce-subtle {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes spin-slow {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes step-pop {
+    0% {
+      opacity: 0;
+      transform: translateY(18px) scale(0.96);
+    }
+    65% {
+      opacity: 0.95;
+      transform: translateY(-3px) scale(1.015);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes chalk-glow {
+    0% {
+      box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+    }
+    50% {
+      box-shadow: 0 0 20px rgba(251, 191, 36, 0.45);
+    }
+    100% {
+      box-shadow: 0 0 0 rgba(251, 191, 36, 0);
+    }
+  }
+
+  @keyframes twinkle {
+    0%, 100% {
+      transform: scale(1) rotate(0deg);
+      opacity: 0.8;
+    }
+    50% {
+      transform: scale(1.25) rotate(15deg);
+      opacity: 1;
+    }
+  }
+
+  .animate-bounce-subtle {
+    animation: bounce-subtle 2.5s ease-in-out infinite;
+  }
+
+  .animate-spin-slow {
+    animation: spin-slow 12s linear infinite;
+  }
+
+  .animate-step-pop {
+    animation: step-pop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .animate-chalk-glow {
+    animation: chalk-glow 1.8s ease-in-out;
+  }
+
+  .animate-twinkle {
+    animation: twinkle 1.5s ease-in-out infinite;
+  }
+}

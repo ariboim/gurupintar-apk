@@ -1,0 +1,62 @@
+[
+  {
+    "id": "stu-adm-1793385383827-bgi1",
+    "name": "Kirana Putri",
+    "phone": "081399001122",
+    "email": "kirana@sekolah.id",
+    "tokens": 10,
+    "status": "aktif",
+    "createdAt": 1793385383827,
+    "lastLoginAt": 1793385383827,
+    "welcomeEmailSent": true,
+    "notes": "Manual CS"
+  },
+  {
+    "id": "stu-1793385356835-v267",
+    "name": "Ahmad Fauzi",
+    "phone": "089673686625",
+    "email": "ahmad.fauzi@gmail.com",
+    "tokens": 5,
+    "status": "aktif",
+    "createdAt": 1793385356835,
+    "lastLoginAt": 1793385356835,
+    "welcomeEmailSent": true,
+    "notes": "Pendaftaran otomatis siswa baru (+5 Token Gratis)"
+  },
+  {
+    "id": "stu-1793384701489-d0f4",
+    "name": "Budi Santoso",
+    "phone": "081299887766",
+    "email": "budi.santoso@gmail.com",
+    "tokens": 5,
+    "status": "aktif",
+    "createdAt": 1793384701489,
+    "lastLoginAt": 1793384701489,
+    "welcomeEmailSent": true,
+    "notes": "Pendaftaran otomatis siswa baru (+5 Token Gratis)"
+  },
+  {
+    "id": "stu-seed-1",
+    "name": "Adit Pratama",
+    "phone": "081234567890",
+    "email": "adit.pratama@gmail.com",
+    "tokens": 5,
+    "status": "aktif",
+    "createdAt": 1793205452855,
+    "lastLoginAt": 1793371052855,
+    "welcomeEmailSent": true,
+    "notes": "Pendaftaran mandiri siswa baru (Fase B)"
+  },
+  {
+    "id": "stu-seed-2",
+    "name": "Siti Rahmawati",
+    "phone": "085712345678",
+    "email": "bca.ccpl@gmail.com",
+    "tokens": 15,
+    "status": "aktif",
+    "createdAt": 1793119052855,
+    "lastLoginAt": 1793376452855,
+    "welcomeEmailSent": true,
+    "notes": "Top-up Mayar terverifikasi"
+  }
+]
