@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Camera,
   Upload,
@@ -16,6 +16,11 @@ import {
   AlertCircle,
   ExternalLink,
   FileText,
+  SwitchCamera,
+  Smartphone,
+  Zap,
+  ZapOff,
+  RefreshCw,
 } from 'lucide-react';
 
 interface QuestionInputProps {
@@ -71,7 +76,17 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string>('image/jpeg');
   const [isRecording, setIsRecording] = useState(false);
+
+  // Camera state
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [hasTorch, setHasTorch] = useState(false);
+  const [isTorchOn, setIsTorchOn] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [showCameraMenu, setShowCameraMenu] = useState(false);
 
   // Google Drive state
   const [isDriveInputOpen, setIsDriveInputOpen] = useState(false);
@@ -87,6 +102,7 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
   } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const nativeCameraInputRef = useRef<HTMLInputElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -95,7 +111,28 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
   const [selectedSample, setSelectedSample] = useState<string | null>(null);
   const [isHighlightQuestion, setIsHighlightQuestion] = useState(false);
 
-  // File Upload Handler
+  // Keep videoRef.srcObject synced whenever stream or camera state updates
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && cameraStream) {
+      if (videoRef.current.srcObject !== cameraStream) {
+        videoRef.current.srcObject = cameraStream;
+      }
+      videoRef.current.play().catch((err) => {
+        console.warn('Video playback warning:', err);
+      });
+    }
+  }, [isCameraActive, cameraStream]);
+
+  // Clean up any open camera stream when component unmounts
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
+  // File Upload Handler (Gallery or File Picker)
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -109,34 +146,143 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
       setDriveMeta(null);
     };
     reader.readAsDataURL(file);
+    // Reset file input value so selecting the same photo again triggers change
+    e.target.value = '';
   };
 
-  // Live Camera capture
-  const startCamera = async () => {
+  // Launch Native Device Camera (capture="environment")
+  const handleNativeCameraLaunch = () => {
+    setShowCameraMenu(false);
+    stopCamera();
+    if (nativeCameraInputRef.current) {
+      nativeCameraInputRef.current.value = '';
+      nativeCameraInputRef.current.click();
+    }
+  };
+
+  // Live Camera capture (In-Browser Viewfinder)
+  const startCamera = async (facing: 'environment' | 'user' = cameraFacingMode) => {
+    setShowCameraMenu(false);
+    setIsCameraLoading(true);
+    setCameraError(null);
+    setIsCameraActive(true);
+
+    // Stop previous tracks if switching
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setCameraStream(null);
+    setIsTorchOn(false);
+
+    let stream: MediaStream | null = null;
     try {
-      setIsCameraActive(true);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+      // Step 1: Request high resolution with requested facingMode
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: facing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
       });
+    } catch (err1) {
+      console.warn('High-res facingMode camera failed, trying flexible facing mode...', err1);
+      try {
+        // Step 2: Flexible facing mode
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: facing } },
+        });
+      } catch (err2) {
+        console.warn('Flexible facingMode failed, falling back to any video device...', err2);
+        try {
+          // Step 3: Any available video device
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        } catch (err3) {
+          console.error('All camera attempts failed:', err3);
+          setIsCameraActive(false);
+          setIsCameraLoading(false);
+
+          // Graceful fallback to native device camera so student is never stuck!
+          if (nativeCameraInputRef.current) {
+            nativeCameraInputRef.current.value = '';
+            nativeCameraInputRef.current.click();
+          }
+          alert(
+            'Pratinjau kamera web terhalang atau tidak didukung di browser ini.\n\nKak Bintang otomatis membuka Kamera Bawaan HP Anda agar bisa langsung foto PR!'
+          );
+          return;
+        }
+      }
+    }
+
+    if (stream) {
       streamRef.current = stream;
+      setCameraStream(stream);
+      setIsCameraLoading(false);
+
+      // Immediately connect to video element if already rendered
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
       }
-    } catch (err) {
-      alert('Tidak dapat mengakses kamera. Silakan gunakan tombol Unggah Foto.');
-      setIsCameraActive(false);
+
+      // Check if device supports torch/flashlight
+      const track = stream.getVideoTracks()[0];
+      if (track && 'getCapabilities' in track) {
+        try {
+          const capabilities = (track as any).getCapabilities?.() || {};
+          setHasTorch(Boolean(capabilities.torch));
+        } catch {
+          setHasTorch(false);
+        }
+      }
+    }
+  };
+
+  const toggleFacingMode = () => {
+    const nextFacing = cameraFacingMode === 'environment' ? 'user' : 'environment';
+    setCameraFacingMode(nextFacing);
+    startCamera(nextFacing);
+  };
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (track) {
+      try {
+        const nextTorch = !isTorchOn;
+        await (track as any).applyConstraints({
+          advanced: [{ torch: nextTorch }],
+        });
+        setIsTorchOn(nextTorch);
+      } catch (err) {
+        console.warn('Torch toggle failed', err);
+      }
     }
   };
 
   const capturePhoto = () => {
     if (!videoRef.current) return;
+    const video = videoRef.current;
+
+    // Trigger visual camera shutter flash
+    setIsFlashing(true);
+    setTimeout(() => setIsFlashing(false), 200);
+
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
+    const width = video.videoWidth || 1280;
+    const height = video.videoHeight || 720;
+    canvas.width = width;
+    canvas.height = height;
+
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      if (cameraFacingMode === 'user') {
+        ctx.translate(width, 0);
+        ctx.scale(-1, 1);
+      }
+      ctx.drawImage(video, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       setImagePreview(dataUrl);
       setImageMime('image/jpeg');
       setActiveDriveUrl(null);
@@ -150,7 +296,11 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    setCameraStream(null);
     setIsCameraActive(false);
+    setIsTorchOn(false);
+    setIsCameraLoading(false);
+    setCameraError(null);
   };
 
   // Google Drive Link Resolver
@@ -325,28 +475,203 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
           </div>
         </div>
 
-        {/* Live Camera View if Active */}
-        {isCameraActive && (
-          <div className="relative rounded-2xl overflow-hidden bg-black aspect-video flex flex-col items-center justify-center">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              className="w-full h-full object-cover"
-            />
-            <div className="absolute bottom-4 flex items-center gap-3">
+        {/* Camera Selection Modal */}
+        {showCameraMenu && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-5 shadow-2xl border-2 border-amber-300 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-amber-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-slate-900">Pilih Metode Kamera</h4>
+                    <p className="text-[11px] text-slate-500">Foto soal dari lembar buku PR</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCameraMenu(false)}
+                  className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                <button
+                  type="button"
+                  onClick={handleNativeCameraLaunch}
+                  className="w-full text-left p-3.5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 hover:from-amber-100 hover:to-orange-100 border-2 border-amber-200 hover:border-amber-400 transition-all cursor-pointer flex items-center gap-3 group active:scale-98"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white flex items-center justify-center flex-shrink-0 shadow-md group-hover:scale-105 transition-transform">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-bold text-xs text-slate-900">Kamera HP (Bawaan)</span>
+                      <span className="text-[9px] font-extrabold bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                        Paling Stabil
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Buka kamera ponsel langsung. Hasil foto beresolusi tinggi, jernih, dan auto-fokus.
+                    </p>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => startCamera('environment')}
+                  className="w-full text-left p-3.5 rounded-2xl bg-white hover:bg-amber-50/60 border-2 border-slate-200 hover:border-amber-300 transition-all cursor-pointer flex items-center gap-3 group active:scale-98"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 group-hover:bg-amber-100 text-slate-700 group-hover:text-amber-800 flex items-center justify-center flex-shrink-0 transition-colors">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="font-bold text-xs text-slate-900">Kamera Live di Layar</span>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Pratinjau langsung di layar peramban dengan panduan kotak bidik PR.
+                    </p>
+                  </div>
+                </button>
+              </div>
+
               <button
                 type="button"
-                onClick={capturePhoto}
-                className="px-5 py-2.5 rounded-full bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs shadow-lg flex items-center gap-1.5 cursor-pointer"
+                onClick={() => setShowCameraMenu(false)}
+                className="w-full py-2 rounded-xl text-center text-xs font-bold text-slate-500 hover:text-slate-700 hover:bg-slate-50 cursor-pointer"
               >
-                <Camera className="w-4 h-4" />
-                <span>Foto Soal Sekarang</span>
+                Batal
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Live Camera Viewfinder if Active */}
+        {isCameraActive && (
+          <div className="relative rounded-3xl overflow-hidden bg-slate-950 border-2 border-amber-400 shadow-xl flex flex-col animate-fade-in">
+            {/* Visual flash effect overlay */}
+            {isFlashing && (
+              <div className="absolute inset-0 bg-white z-40 animate-ping opacity-90 pointer-events-none" />
+            )}
+
+            {/* Viewfinder Header */}
+            <div className="absolute top-0 inset-x-0 p-3 bg-gradient-to-b from-black/80 via-black/40 to-transparent z-20 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 backdrop-blur-md text-amber-300 border border-amber-500/40 text-xs font-bold shadow-xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {cameraFacingMode === 'environment' ? 'Kamera Belakang (Foto PR)' : 'Kamera Depan'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {hasTorch && (
+                  <button
+                    type="button"
+                    onClick={toggleTorch}
+                    className={`p-2 rounded-full backdrop-blur-md transition-all cursor-pointer ${
+                      isTorchOn
+                        ? 'bg-amber-400 text-slate-950 shadow-md ring-2 ring-amber-300 font-bold'
+                        : 'bg-black/60 text-white hover:bg-black/80'
+                    }`}
+                    title={isTorchOn ? 'Matikan Senter' : 'Nyalakan Senter'}
+                  >
+                    {isTorchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleFacingMode}
+                  className="p-2 rounded-full bg-black/60 hover:bg-black/80 text-white backdrop-blur-md transition-all cursor-pointer shadow-xs active:rotate-180 duration-200"
+                  title="Putar Kamera (Depan / Belakang)"
+                >
+                  <SwitchCamera className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="p-2 rounded-full bg-black/60 hover:bg-rose-600 text-white backdrop-blur-md transition-all cursor-pointer"
+                  title="Tutup Kamera"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Video Screen & Target Scanner Frame */}
+            <div className="relative aspect-[4/3] sm:aspect-video w-full bg-black flex items-center justify-center overflow-hidden">
+              {isCameraLoading ? (
+                <div className="flex flex-col items-center justify-center gap-3 text-amber-300 p-6 text-center">
+                  <RefreshCw className="w-8 h-8 animate-spin text-amber-400" />
+                  <p className="text-xs font-bold">Menyiapkan kamera Anda...</p>
+                </div>
+              ) : (
+                <>
+                  <video
+                    ref={(el) => {
+                      videoRef.current = el;
+                      if (el && cameraStream && el.srcObject !== cameraStream) {
+                        el.srcObject = cameraStream;
+                        el.play().catch(() => {});
+                      }
+                    }}
+                    autoPlay
+                    playsInline
+                    muted
+                    className={`w-full h-full object-cover ${cameraFacingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+                  />
+
+                  {/* Scanner Guidelines Frame */}
+                  <div className="absolute inset-4 sm:inset-8 border-2 border-dashed border-amber-400/70 rounded-2xl pointer-events-none flex flex-col justify-between p-3">
+                    <div className="flex justify-between">
+                      <div className="w-4 h-4 border-t-4 border-l-4 border-amber-400 rounded-tl" />
+                      <div className="w-4 h-4 border-t-4 border-r-4 border-amber-400 rounded-tr" />
+                    </div>
+                    <div className="text-center">
+                      <span className="inline-block px-3 py-1 rounded-full bg-black/70 backdrop-blur-sm text-amber-200 text-[11px] font-semibold">
+                        Arahkan kamera ke lembar/soal PR Anda
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <div className="w-4 h-4 border-b-4 border-l-4 border-amber-400 rounded-bl" />
+                      <div className="w-4 h-4 border-b-4 border-r-4 border-amber-400 rounded-br" />
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Bottom Viewfinder Bar with Capture & Native Camera Option */}
+            <div className="p-3.5 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-2 sm:gap-3 flex-wrap">
+              <button
+                type="button"
+                onClick={handleNativeCameraLaunch}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-semibold border border-amber-500/30 transition-all cursor-pointer active:scale-95 shadow-xs"
+                title="Beralih ke aplikasi kamera bawaan HP untuk foto beresolusi penuh"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span className="text-[11px] sm:text-xs">Kamera HP (Bawaan)</span>
+              </button>
+
+              {/* Shutter Button */}
+              <button
+                type="button"
+                disabled={isCameraLoading}
+                onClick={capturePhoto}
+                className="px-6 py-2.5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black text-xs sm:text-sm shadow-lg shadow-orange-500/30 flex items-center gap-2 transform active:scale-95 transition-all cursor-pointer ring-4 ring-amber-400/30 disabled:opacity-50"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+                <Camera className="w-4 h-4" />
+                <span>Ambil Foto</span>
+              </button>
+
               <button
                 type="button"
                 onClick={stopCamera}
-                className="px-4 py-2.5 rounded-full bg-slate-800/80 hover:bg-slate-900 text-white font-bold text-xs cursor-pointer"
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition-all cursor-pointer active:scale-95"
               >
                 Batal
               </button>
@@ -410,31 +735,49 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
 
         {/* Regular Uploaded Image Preview Box (if not drive) */}
         {imagePreview && !activeDriveUrl && (
-          <div className="relative rounded-2xl border-2 border-amber-300 p-2 bg-amber-50/60 flex items-center gap-3">
-            <div className="w-20 h-20 rounded-xl overflow-hidden border border-amber-200 bg-white flex-shrink-0">
-              <img
-                src={imagePreview}
-                alt="Foto Soal PR"
-                className="w-full h-full object-cover"
-              />
+          <div className="relative rounded-2xl border-2 border-amber-300 p-2.5 bg-amber-50/70 flex items-center justify-between gap-3 animate-fade-in shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-16 h-16 rounded-xl overflow-hidden border-2 border-amber-300 bg-white flex-shrink-0 shadow-xs">
+                <img
+                  src={imagePreview}
+                  alt="Foto Soal PR"
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <div className="flex-1 min-w-0 text-xs">
+                <p className="font-bold text-amber-950 flex items-center gap-1.5 truncate">
+                  <ImageIcon className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                  <span>Foto Lembar PR Terlampir</span>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 font-extrabold px-1.5 py-0.2 rounded">
+                    Siap Dibahas
+                  </span>
+                </p>
+                <p className="text-[11px] text-amber-800/80 truncate mt-0.5">
+                  Kak Bintang akan membaca tulisan dan gambar soal pada lembar PR ini secara otomatis.
+                </p>
+              </div>
             </div>
-            <div className="flex-1 text-xs">
-              <p className="font-bold text-amber-950 flex items-center gap-1">
-                <ImageIcon className="w-3.5 h-3.5 text-amber-600" />
-                Foto Soal PR Terlampir
-              </p>
-              <p className="text-[11px] text-amber-800/80">
-                Kak Bintang akan membaca tulisan dan gambar pada lembar PR ini secara otomatis.
-              </p>
+
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowCameraMenu(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-200/80 hover:bg-amber-300 active:bg-orange-500 active:text-white text-amber-900 text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                title="Foto Ulang Soal PR"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span className="hidden sm:inline text-[11px]">Foto Ulang</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setImagePreview(null)}
+                className="p-1.5 rounded-full bg-rose-100 hover:bg-rose-200 active:bg-rose-500 active:text-white text-rose-700 transition-colors cursor-pointer"
+                title="Hapus Foto"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => setImagePreview(null)}
-              className="p-1.5 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-700 transition-colors cursor-pointer mr-1"
-              title="Hapus Foto"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
         )}
 
@@ -568,6 +911,15 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
                 onChange={handleFileChange}
                 className="hidden"
               />
+              {/* Native device camera input (works 100% reliably on all smartphones) */}
+              <input
+                ref={nativeCameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileChange}
+                className="hidden"
+              />
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -581,9 +933,9 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
               {/* Camera snap */}
               <button
                 type="button"
-                onClick={startCamera}
+                onClick={() => setShowCameraMenu(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-100/90 hover:bg-amber-200 active:bg-orange-500 active:text-white active:scale-95 text-amber-900 text-xs font-semibold transition-all cursor-pointer shadow-xs"
-                title="Buka Kamera untuk foto buku PR"
+                title="Foto Buku / Soal PR dengan Kamera"
               >
                 <Camera className="w-3.5 h-3.5 text-amber-700" />
                 <span className="inline text-[11px] sm:text-xs">Kamera</span>
