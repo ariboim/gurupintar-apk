@@ -73,20 +73,23 @@ export async function safeFetchJson<T = any>(
 ): Promise<{ ok: boolean; status: number; data?: T; isHtmlFallback: boolean; errorText?: string }> {
   try {
     const res = await fetch(url, options);
-    const contentType = res.headers.get('content-type') || '';
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const rawText = await res.text();
+    const trimmed = rawText.trim();
 
     const isHtml =
       contentType.includes('text/html') ||
-      rawText.trim().toLowerCase().startsWith('<!doctype') ||
-      rawText.trim().toLowerCase().startsWith('<html');
+      contentType.includes('text/plain') ||
+      trimmed.toLowerCase().startsWith('<!doctype') ||
+      trimmed.toLowerCase().startsWith('<html') ||
+      trimmed.startsWith('<');
 
-    if (isHtml) {
+    if (isHtml || (!trimmed.startsWith('{') && !trimmed.startsWith('['))) {
       return {
         ok: false,
         status: res.status,
         isHtmlFallback: true,
-        errorText: 'Server mengembalikan dokumen HTML (mode hosting statis/Netlify).',
+        errorText: 'Server mengembalikan dokumen statis/HTML (mode hosting Netlify).',
       };
     }
 
@@ -102,15 +105,15 @@ export async function safeFetchJson<T = any>(
       return {
         ok: false,
         status: res.status,
-        isHtmlFallback: false,
-        errorText: rawText || 'Gagal mengurai respons data dari server.',
+        isHtmlFallback: true,
+        errorText: 'Respon server bukan format JSON yang valid.',
       };
     }
   } catch (err: any) {
     return {
       ok: false,
       status: 0,
-      isHtmlFallback: false,
+      isHtmlFallback: true,
       errorText: err.message || 'Koneksi jaringan terputus.',
     };
   }

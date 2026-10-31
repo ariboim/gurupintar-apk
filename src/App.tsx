@@ -179,20 +179,28 @@ export default function App() {
 
     const checkStudentStatus = async () => {
       try {
-        const res = await fetch(`/api/student/status?studentId=${currentStudent.id}`);
+        const res = await safeFetchJson<{ student?: StudentUser }>(`/api/student/status?studentId=${currentStudent.id}`);
         if (res.status === 403) {
           setIsStudentBlocked(true);
           setCurrentStudent((prev) => (prev ? { ...prev, status: 'diblokir' } : null));
           return;
         }
-        if (res.ok) {
-          const data = await res.json();
-          if (data.student) {
-            const updated: StudentUser = data.student;
-            if (updated.status !== currentStudent.status || updated.tokens !== currentStudent.tokens) {
-              setCurrentStudent(updated);
-              setIsStudentBlocked(updated.status === 'diblokir');
-              setTokens(updated.tokens);
+        if (res.ok && res.data?.student) {
+          const updated: StudentUser = res.data.student;
+          if (updated.status !== currentStudent.status || updated.tokens !== currentStudent.tokens) {
+            setCurrentStudent(updated);
+            setIsStudentBlocked(updated.status === 'diblokir');
+            setTokens(updated.tokens);
+          }
+        } else if (res.isHtmlFallback) {
+          // Read from local synchronized student database
+          const localList = getLocalStudents();
+          const found = localList.find((s) => s.id === currentStudent.id);
+          if (found) {
+            if (found.status !== currentStudent.status || found.tokens !== currentStudent.tokens) {
+              setCurrentStudent(found);
+              setIsStudentBlocked(found.status === 'diblokir');
+              setTokens(found.tokens);
             }
           }
         }
@@ -882,16 +890,21 @@ export default function App() {
         onRefreshActiveStudent={async () => {
           if (currentStudent) {
             try {
-              const res = await fetch(`/api/student/status?studentId=${currentStudent.id}`);
+              const res = await safeFetchJson<{ student?: StudentUser }>(`/api/student/status?studentId=${currentStudent.id}`);
               if (res.status === 403) {
                 setIsStudentBlocked(true);
                 setCurrentStudent((prev) => (prev ? { ...prev, status: 'diblokir' } : null));
-              } else if (res.ok) {
-                const data = await res.json();
-                if (data.student) {
-                  setCurrentStudent(data.student);
-                  setIsStudentBlocked(data.student.status === 'diblokir');
-                  setTokens(data.student.tokens);
+              } else if (res.ok && res.data?.student) {
+                setCurrentStudent(res.data.student);
+                setIsStudentBlocked(res.data.student.status === 'diblokir');
+                setTokens(res.data.student.tokens);
+              } else if (res.isHtmlFallback) {
+                const localList = getLocalStudents();
+                const found = localList.find((s) => s.id === currentStudent.id);
+                if (found) {
+                  setCurrentStudent(found);
+                  setIsStudentBlocked(found.status === 'diblokir');
+                  setTokens(found.tokens);
                 }
               }
             } catch {
