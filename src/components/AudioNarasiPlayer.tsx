@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Volume2, Sparkles, Gauge, Loader2, ArrowDown } from 'lucide-react';
 import { splitNarrationIntoSentences, getIndonesianVoices } from '../utils/speech';
+import { safeFetchJson } from '../utils/studentSync';
 
 interface AudioNarasiPlayerProps {
   narasiText: string;
@@ -34,18 +35,17 @@ export const AudioNarasiPlayer: React.FC<AudioNarasiPlayerProps> = ({
       let audioUrl = cachedAudioUrl;
 
       if (!audioUrl) {
-        const res = await fetch('/api/generate-tts', {
+        const res = await safeFetchJson<any>('/api/generate-tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: narasiText }),
         });
 
-        const data = await res.json();
-        if (!res.ok || !data.audioBase64) {
-          throw new Error(data.error || 'Gagal memuat suara studio');
+        if (res.isHtmlFallback || !res.ok || !res.data?.audioBase64) {
+          throw new Error(res.data?.error || 'Gagal memuat suara studio');
         }
 
-        audioUrl = `data:audio/wav;base64,${data.audioBase64}`;
+        audioUrl = `data:audio/wav;base64,${res.data.audioBase64}`;
         setCachedAudioUrl(audioUrl);
       }
 

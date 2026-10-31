@@ -5,6 +5,7 @@ import {
   TokenTransaction,
   StudentUser,
 } from './types';
+import { safeFetchJson, getLocalStudents, saveLocalStudents } from './utils/studentSync';
 import { Header } from './components/Header';
 import { KakBintangAvatar } from './components/KakBintangAvatar';
 import { QuestionInput } from './components/QuestionInput';
@@ -269,13 +270,12 @@ export default function App() {
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const res = await fetch('/api/check-payment-status');
-        const data = await res.json();
-        if (data.hasPaid && data.payment) {
-          const awarded = data.payment.tokens || 30;
+        const res = await safeFetchJson<any>('/api/check-payment-status');
+        if (res.ok && res.data?.hasPaid && res.data?.payment) {
+          const awarded = res.data.payment.tokens || 30;
           handleAddTokens(
             awarded,
-            `Top-up Mayar Otomatis (Rp ${Number(data.payment.amount).toLocaleString('id-ID')} via mayar.to/indo-digital)`,
+            `Top-up Mayar Otomatis (Rp ${Number(res.data.payment.amount).toLocaleString('id-ID')} via mayar.to/indo-digital)`,
             'mayar_topup'
           );
           playChimeSound('success');
@@ -340,8 +340,17 @@ export default function App() {
 
     if (currentStudent) {
       setCurrentStudent((prev) => (prev ? { ...prev, tokens: newBal } : null));
+
+      // Mirror token deduction in local storage
+      const localList = getLocalStudents();
+      const idx = localList.findIndex((s) => s.id === currentStudent.id);
+      if (idx !== -1) {
+        localList[idx].tokens = newBal;
+        saveLocalStudents(localList);
+      }
+
       try {
-        await fetch('/api/student/consume-token', {
+        await safeFetchJson('/api/student/consume-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ studentId: currentStudent.id, amount: 1 }),
@@ -409,7 +418,7 @@ export default function App() {
     }, 9800);
 
     try {
-      const res = await fetch('/api/analyze-pr', {
+      const res = await safeFetchJson<any>('/api/analyze-pr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -418,12 +427,17 @@ export default function App() {
 
       clearTimeout(timeoutId);
 
-      const json = await res.json();
-      if (!res.ok) {
-        throw new Error(json.error || 'Gagal menganalisis soal PR.');
+      if (res.isHtmlFallback) {
+        throw new Error(
+          'Layanan analisis AI belum aktif di server ini. Pastikan backend server atau Netlify Functions sudah aktif.'
+        );
       }
 
-      const result: TanyaGuruResult = json.data;
+      if (!res.ok || !res.data?.success) {
+        throw new Error(res.data?.error || 'Gagal menganalisis soal PR.');
+      }
+
+      const result: TanyaGuruResult = res.data.data;
       setCurrentResult(result);
       setActiveQuestionMeta(data);
 

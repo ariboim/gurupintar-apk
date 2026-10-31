@@ -1,5 +1,17 @@
 [
   {
+    "id": "stu-1793416414146-on3j",
+    "name": "Arya rohali",
+    "phone": "082113750256",
+    "email": "indodigital1978@gmail.com",
+    "tokens": 5,
+    "status": "aktif",
+    "createdAt": 1793416414146,
+    "lastLoginAt": 1793416414146,
+    "welcomeEmailSent": true,
+    "notes": "Pendaftaran otomatis siswa baru (+5 Token Gratis)"
+  },
+  {
     "id": "stu-adm-1793385383827-bgi1",
     "name": "Kirana Putri",
     "phone": "081399001122",

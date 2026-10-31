@@ -22,6 +22,7 @@ import {
   ZapOff,
   RefreshCw,
 } from 'lucide-react';
+import { safeFetchJson } from '../utils/studentSync';
 
 interface QuestionInputProps {
   onAnalyze: (data: {
@@ -313,17 +314,21 @@ export const QuestionInput: React.FC<QuestionInputProps> = ({
     setDriveError(null);
 
     try {
-      const res = await fetch('/api/resolve-drive-link', {
+      const res = await safeFetchJson<any>('/api/resolve-drive-link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ driveUrl: url }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal memuat link Google Drive.');
+      if (res.isHtmlFallback) {
+        throw new Error('Layanan Google Drive sedang disiapkan di server ini.');
       }
 
+      if (!res.ok || !res.data?.success) {
+        throw new Error(res.data?.error || 'Gagal memuat link Google Drive.');
+      }
+
+      const data = res.data;
       setActiveDriveUrl(url);
       setDriveMeta({
         fileId: data.fileId,

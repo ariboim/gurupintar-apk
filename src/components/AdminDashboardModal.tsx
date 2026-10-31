@@ -31,6 +31,15 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { StudentUser } from '../types';
+import {
+  adminFetchStudents,
+  adminCreateStudentManual,
+  adminLogin,
+  adminAddTokensToStudent,
+  adminToggleBlockStudent,
+  adminDeleteStudent,
+  safeFetchJson,
+} from '../utils/studentSync';
 
 interface AdminLog {
   id: string;
@@ -160,16 +169,11 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const verifyAndFetchLogs = async (token: string, silent = false) => {
     if (!silent) setLogsLoading(true);
     try {
-      const res = await fetch('/api/admin/logs', {
+      const res = await safeFetchJson<{ logs?: AdminLog[] }>('/api/admin/logs', {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) {
-        handleLogout();
-        return;
-      }
-      const data = await res.json();
-      if (data.logs) {
-        setLogs(data.logs);
+      if (res.ok && res.data?.logs) {
+        setLogs(res.data.logs);
       }
     } catch {
       // Ignore
@@ -181,17 +185,12 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
   const fetchStudents = async (token: string, silent = false) => {
     if (!silent) setStudentsLoading(true);
     try {
-      const res = await fetch('/api/admin/students', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStudents(data.students || []);
-        if (data.stats) {
-          setStudentStats(data.stats);
-        }
-        setLastSyncTime(new Date());
+      const data = await adminFetchStudents(token);
+      setStudents(data.students || []);
+      if (data.stats) {
+        setStudentStats(data.stats);
       }
+      setLastSyncTime(new Date());
     } catch (e) {
       console.error('Failed to fetch students:', e);
     } finally {
@@ -207,23 +206,13 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setStudentActionLoading(true);
     setActionError(null);
     try {
-      const res = await fetch('/api/admin/students/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({
-          name: newStuName.trim(),
-          phone: newStuPhone.trim(),
-          email: newStuEmail.trim(),
-          tokens: newStuTokens,
-          notes: newStuNotes.trim() || 'Ditambahkan langsung oleh Admin',
-        }),
+      await adminCreateStudentManual(sessionToken, {
+        name: newStuName.trim(),
+        phone: newStuPhone.trim(),
+        email: newStuEmail.trim(),
+        tokens: newStuTokens,
+        notes: newStuNotes.trim() || 'Ditambahkan langsung oleh Admin',
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal menambahkan data siswa.');
 
       setActionSuccess(`Data siswa "${newStuName}" berhasil didaftarkan ke database.`);
       setIsAddStudentOpen(false);
@@ -254,28 +243,16 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setLoginError(null);
 
     try {
-      const res = await fetch('/api/admin/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: inputUsername.trim(),
-          password: inputPassword.trim(),
-        }),
-      });
+      const result = await adminLogin(inputUsername.trim(), inputPassword.trim());
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Autentikasi gagal. Periksa kembali username dan password.');
-      }
-
-      setSessionToken(data.sessionToken);
-      setAdminUsername(data.username);
-      sessionStorage.setItem('tanya_guru_admin_token', data.sessionToken);
-      sessionStorage.setItem('tanya_guru_admin_user', data.username);
+      setSessionToken(result.sessionToken);
+      setAdminUsername(result.username);
+      sessionStorage.setItem('tanya_guru_admin_token', result.sessionToken);
+      sessionStorage.setItem('tanya_guru_admin_user', result.username);
 
       setInputPassword('');
-      verifyAndFetchLogs(data.sessionToken);
-      fetchStudents(data.sessionToken);
+      verifyAndFetchLogs(result.sessionToken);
+      fetchStudents(result.sessionToken);
     } catch (err: any) {
       setLoginError(err.message || 'Gagal login admin.');
     } finally {
@@ -308,21 +285,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setStudentActionLoading(true);
     setActionError(null);
     try {
-      const res = await fetch('/api/admin/students/add-tokens', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({
-          studentId,
-          tokens: amount,
-          reason: note,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal menambahkan token.');
+      await adminAddTokensToStudent(sessionToken, studentId, amount, note);
 
       setActionSuccess(`Berhasil menambahkan +${amount} token untuk siswa!`);
       setTokenModalStudent(null);
@@ -349,22 +312,9 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setStudentActionLoading(true);
     setActionError(null);
     try {
-      const res = await fetch('/api/admin/students/toggle-block', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({
-          studentId: student.id,
-          reason: isNowBlocked ? 'Diblokir oleh Admin' : 'Blokir dibuka oleh Admin',
-        }),
-      });
+      await adminToggleBlockStudent(sessionToken, student.id, isNowBlocked ? 'diblokir' : 'aktif');
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal mengubah status blokir.');
-
-      setActionSuccess(data.message || 'Status blokir berhasil diperbarui.');
+      setActionSuccess(isNowBlocked ? `Akses siswa "${student.name}" berhasil diblokir.` : `Blokir akses siswa "${student.name}" dibuka.`);
       fetchStudents(sessionToken);
       verifyAndFetchLogs(sessionToken);
       if (onRefreshActiveStudent) onRefreshActiveStudent();
@@ -389,13 +339,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
     setStudentActionLoading(true);
     setActionError(null);
     try {
-      const res = await fetch(`/api/admin/students/${student.id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${sessionToken}` },
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Gagal menghapus siswa.');
+      await adminDeleteStudent(sessionToken, student.id);
 
       setActionSuccess(`Data siswa "${student.name}" berhasil dihapus dari database.`);
       fetchStudents(sessionToken);
@@ -444,7 +388,7 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
       referenceId.trim() || `MANUAL-${Date.now().toString().slice(-6)}`;
 
     try {
-      const res = await fetch('/api/admin/add-tokens', {
+      const res = await safeFetchJson<any>('/api/admin/add-tokens', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -459,9 +403,8 @@ export const AdminDashboardModal: React.FC<AdminDashboardModalProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Gagal menambahkan token manual.');
+      if (!res.isHtmlFallback && !res.ok) {
+        throw new Error(res.data?.error || 'Gagal menambahkan token manual.');
       }
 
       if (targetSession === 'current') {

@@ -16,6 +16,7 @@ import {
 import confetti from 'canvas-confetti';
 import { playChimeSound } from '../utils/speech';
 import { StudentUser } from '../types';
+import { studentLoginOrRegister } from '../utils/studentSync';
 
 interface StudentAuthModalProps {
   isOpen: boolean;
@@ -67,43 +68,30 @@ export const StudentAuthModal: React.FC<StudentAuthModalProps> = ({
     setIsBlocked(false);
 
     try {
-      const res = await fetch('/api/student/login-register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: name.trim(),
-          phone: phone.trim(),
-          email: email.trim(),
-          mode: authMode,
-        }),
+      const result = await studentLoginOrRegister({
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        mode: authMode,
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.isBlocked || res.status === 403) {
+      if (!result.success) {
+        if (result.isBlocked) {
           setIsBlocked(true);
-          setErrorMsg(data.error || 'Akun Anda saat ini diblokir oleh Admin.');
-          return;
         }
-        throw new Error(data.error || 'Gagal memproses data siswa.');
+        setErrorMsg(result.error || 'Gagal memproses data siswa.');
+        return;
       }
 
-      const student: StudentUser = data.student;
+      const student: StudentUser = result.student;
 
-      // Broadcast synchronization event to live listeners (Admin Dashboard, App state)
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('tanya_guru_student_updated', { detail: student }));
-        localStorage.setItem('tanya_guru_sync_time', Date.now().toString());
-      }
-
-      if (data.isNewRegistration && data.welcomeGreeting) {
+      if (result.isNewRegistration && result.welcomeGreeting) {
         setWelcomeData({
           student,
-          title: data.welcomeGreeting.title,
-          sentToEmail: data.welcomeGreeting.sentToEmail,
-          message: data.welcomeGreeting.message,
-          freeTokens: data.welcomeGreeting.freeTokens,
+          title: result.welcomeGreeting.title,
+          sentToEmail: result.welcomeGreeting.sentToEmail,
+          message: result.welcomeGreeting.message,
+          freeTokens: result.welcomeGreeting.freeTokens,
         });
         playChimeSound('success');
         confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });

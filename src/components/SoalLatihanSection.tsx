@@ -3,6 +3,7 @@ import confetti from 'canvas-confetti';
 import { Target, Send, Sparkles, Star, CheckCircle, RefreshCw, AlertCircle } from 'lucide-react';
 import { PracticeEvaluation } from '../types';
 import { playChimeSound } from '../utils/speech';
+import { safeFetchJson } from '../utils/studentSync';
 
 interface SoalLatihanSectionProps {
   soalLatihan: string;
@@ -28,7 +29,7 @@ export const SoalLatihanSection: React.FC<SoalLatihanSectionProps> = ({
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/check-practice', {
+      const res = await safeFetchJson<any>('/api/check-practice', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -38,10 +39,15 @@ export const SoalLatihanSection: React.FC<SoalLatihanSectionProps> = ({
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal memeriksa jawaban');
+      if (res.isHtmlFallback) {
+        throw new Error('Layanan evaluasi AI sedang disiapkan di server ini.');
       }
+
+      if (!res.ok || !res.data?.success) {
+        throw new Error(res.data?.error || 'Gagal memeriksa jawaban');
+      }
+
+      const data = res.data;
 
       setEvaluation(data.data);
 
